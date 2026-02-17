@@ -6,5 +6,3 @@ Learning about data structures.
 ```sh
 make
 ```
-```
-```
