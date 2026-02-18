@@ -1,4 +1,3 @@
-#include <linux/limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -18,8 +17,12 @@ typedef struct Bucket {
 
 typedef struct HashTable {
     Bucket **buckets;
-    size_t capacity; // The number of buckets
-    size_t count; // The number of occupied entries
+    size_t buckets_capacity;
+    size_t entries_count;
+    size_t used_buckets;
+    size_t resize_count;
+    size_t max_entry_chain_len;
+    size_t *buckets_chain_len;
 } HashTable;
 
 static inline size_t hash(int key) {
@@ -35,53 +38,76 @@ static inline size_t hash(int key) {
 }
 
 size_t ht_get_index(const HashTable *ht, int key) {
-    assert(ht->capacity != 0);
-    return hash(key) & (ht->capacity - 1);
+    assert(ht->buckets_capacity != 0);
+    return hash(key) % ht->buckets_capacity;
 }
 
 void ht_create(HashTable *ht, size_t capacity) {
-    assert(ht != NULL && capacity != 0);
+    assert(ht);
     ht->buckets = calloc(capacity, sizeof(Bucket*));
-    ht->capacity = capacity;
-    ht->count = 0;
+    assert(ht->buckets);
+    ht->buckets_capacity = capacity;
+    ht->entries_count = 0;
+    ht->used_buckets = 0;
+    ht->resize_count = 0;
+    ht->buckets_chain_len = calloc(capacity, sizeof(size_t));
+    assert(ht->buckets_chain_len);
 }
 
 float ht_load_factor(const HashTable *ht) {
-    return (float)ht->count / (float)ht->capacity;
+    assert(ht);
+    return (float)ht->entries_count / (float)ht->buckets_capacity;
 }
 
 void ht_resize(HashTable *ht, size_t new_capacity) {
+    assert(ht);
+    assert(new_capacity != 0);
+    assert(new_capacity > ht->buckets_capacity);
+
     Bucket **old_buckets = ht->buckets;
-    size_t old_capacity = ht->capacity;
+    size_t old_capacity = ht->buckets_capacity;
 
     ht->buckets = calloc(new_capacity, sizeof(Bucket*));
-    ht->capacity = new_capacity;
-    ht->count = 0;
+    assert(ht->buckets);
+    ht->buckets_capacity = new_capacity;
+    ht->entries_count = 0;
+    ht->used_buckets = 0;
+    ht->max_entry_chain_len = 0;
+
+    free(ht->buckets_chain_len);
+    ht->buckets_chain_len = calloc(new_capacity, sizeof(size_t));
+    assert(ht->buckets_chain_len);
 
     for(size_t i = 0; i < old_capacity; ++i) {
         Bucket *current = old_buckets[i];
         while(current) {
             Bucket *next = current->next;
 
-            size_t index = current->pair.key % ht->capacity;
+            size_t index = ht_get_index(ht, current->pair.key);
+
+            if(ht->buckets[index] == NULL) ++ht->used_buckets;
+
             current->next = ht->buckets[index];
             ht->buckets[index] = current;
-            ++ht->count;
+            ++ht->entries_count;
+
+            if(++ht->buckets_chain_len[index] > ht->max_entry_chain_len) ht->max_entry_chain_len = ht->buckets_chain_len[index];
 
             current = next;
         }
     }
 
     free(old_buckets);
+
+    ++ht->resize_count;
 }
 
 void ht_set(HashTable *ht, int key, char *value) {
-    assert(ht != NULL);
+    assert(ht);
 
     size_t index = ht_get_index(ht, key);
     Bucket *current = ht->buckets[index];
-
-    while(current != NULL) {
+    while(current) {
         if(current->pair.key == key) {
             free(current->pair.value);
             current->pair.value = strdup(value);
@@ -91,22 +117,26 @@ void ht_set(HashTable *ht, int key, char *value) {
     }
 
     Bucket *new = malloc(sizeof(Bucket));
+    assert(new);
     new->pair.key = key;
     new->pair.value = strdup(value);
+
+    if(!ht->buckets[index]) ++ht->used_buckets;
 
     new->next = ht->buckets[index];
     ht->buckets[index] = new;
 
-    ++ht->count;
+    ++ht->entries_count;
 
-    if(ht_load_factor(ht) > 0.75) ht_resize(ht, ht->capacity * 2);
+    if(++ht->buckets_chain_len[index] > ht->max_entry_chain_len) ht->max_entry_chain_len = ht->buckets_chain_len[index];
+    if(ht_load_factor(ht) > 0.75f) ht_resize(ht, ht->buckets_capacity * 2);
 }
 
 char *ht_get(const HashTable *ht, int key) {
     size_t index = ht_get_index(ht, key);
     Bucket *current = ht->buckets[index];
 
-    while(current != NULL) {
+    while(current) {
         if(current->pair.key == key) {
             return current->pair.value;
         }
@@ -121,7 +151,7 @@ void ht_delete(HashTable *ht, int key) {
     Bucket *current = ht->buckets[index];
     Bucket *prev = NULL;
 
-    while(current != NULL) {
+    while(current) {
         if(current->pair.key != key) {
             prev = current;
             current = current->next;
@@ -133,15 +163,25 @@ void ht_delete(HashTable *ht, int key) {
 
         free(current->pair.value);
         free(current);
-        --ht->count;
-        break;
+
+        --ht->entries_count;
+
+        size_t old_len = ht->buckets_chain_len[index]--;
+        if(ht->buckets_chain_len[index] == 0) --ht->used_buckets;
+        if(old_len == ht->max_entry_chain_len) {
+            size_t new_max = 0;
+            for(size_t i = 0; i < ht->buckets_capacity; ++i) if(ht->buckets_chain_len[i] > new_max) new_max = ht->buckets_chain_len[i];
+            ht->max_entry_chain_len = new_max;
+        }
+
+        return;
     }
 }
 
 void ht_destroy(HashTable *ht) {
-    for(size_t i = 0; i < ht->capacity; ++i) {
+    for(size_t i = 0; i < ht->buckets_capacity; ++i) {
         Bucket *current = ht->buckets[i];
-        while(current != NULL) {
+        while(current) {
             Bucket *next = current->next;
             free(current->pair.value);
             free(current);
@@ -149,24 +189,24 @@ void ht_destroy(HashTable *ht) {
         }
     }
     free(ht->buckets);
+    free(ht->buckets_chain_len);
+    memset(ht, 0, sizeof(HashTable));
 }
 
 void ht_print(const HashTable *ht) {
-    for(size_t i = 0; i < ht->capacity; ++i) {
+    for(size_t i = 0; i < ht->buckets_capacity; ++i) {
         printf("[%zu] ", i);
 
         Bucket *current = ht->buckets[i];
 
-        if(current == NULL) {
+        if(!current) {
             printf("(empty)\n");
             continue;
         }
 
-        while(current != NULL) {
+        while(current) {
             printf("(%d, \"%s\")", current->pair.key, current->pair.value != NULL ? current->pair.value : "NULL");
-
             if(current->next != NULL) printf("->");
-
             current = current->next;
         }
 
@@ -175,42 +215,25 @@ void ht_print(const HashTable *ht) {
 }
 
 void ht_print_stats(const HashTable *ht) {
-    size_t max = 0;
-    size_t used = 0;
-    size_t total = 0;
-
-    for(size_t i = 0; i < ht->capacity; ++i) {
-        size_t len = 0;
-        Bucket *current = ht->buckets[i];
-
-        while(current != NULL) {
-            ++len;
-            current = current->next;
-        }
-
-        if(len) ++used;
-        if(len > max) max = len;
-        total += len;
-    }
-
-    printf("elements (entries): %zu\n", ht->count);
-    printf("buckets           : %zu\n", ht->capacity);
+    printf("elements (entries): %zu\n", ht->entries_count);
+    printf("buckets           : %zu\n", ht->buckets_capacity);
     printf("load factor       : %.2f\n", ht_load_factor(ht));
-    printf("used buckets      : %zu (%.1f%%)\n", used, 100.0f * used / ht->capacity);
-    printf("avg chain length  : %.2f\n", used ? (float)total / used : 0);
-    printf("max chain length  : %zu\n", max);
+    printf("used buckets      : %zu (%.1f%%)\n", ht->used_buckets, 100.0f * ht->used_buckets / ht->buckets_capacity);
+    printf("avg chain length  : %.2f\n", ht->used_buckets ? (float)ht->entries_count / ht->used_buckets : 0);
+    printf("max chain length  : %zu\n", ht->max_entry_chain_len);
+    printf("resize count      : %zu\n", ht->resize_count);
 }
 
 int main() {
     HashTable ht = {0};
     ht_create(&ht, 4);
 
-    ht_set(&ht, 14, "miki");
-    ht_set(&ht, 53, "misa");
-    ht_set(&ht, 15, "masa");
-    ht_set(&ht, 27, "sasa");
+    char str[128] = {0};
 
-    ht_print(&ht);
+    for(size_t i = 0; i < 30000000; ++i) {
+        sprintf(str, "str#%zu", i);
+        ht_set(&ht, i, str);
+    }
 
     ht_print_stats(&ht);
 
