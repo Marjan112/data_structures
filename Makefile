@@ -1,7 +1,9 @@
-all: ll ht
+PROGRAMS = ll ht
 
-ht: ht.c
-	gcc -o ht ht.c -Wall -Wextra
+all: $(PROGRAMS)
 
-ll: ll.c
-	gcc -o ll ll.c -Wall -Wextra
+%: %.c
+	$(CC) -o $@ $<
+
+clean:
+	rm -f $(PROGRAMS)
