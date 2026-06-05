@@ -12,12 +12,6 @@ typedef struct {
     Node *tail;
 } LinkedList;
 
-void ll_create(LinkedList *ll) {
-    assert(ll != NULL);
-    ll->head = NULL;
-    ll->tail = NULL;
-}
-
 void ll_push(LinkedList *ll, int data) {
     assert(ll != NULL);
 
@@ -99,7 +93,6 @@ void ll_destroy(const LinkedList *ll) {
 
 int main() {
     LinkedList ll = {0};
-    ll_create(&ll);
 
     for(size_t i = 1; i <= 5; ++i) {
         ll_append(&ll, i);
