@@ -44,7 +44,8 @@ void ll_append(LinkedList *ll, int data) {
 }
 
 void ll_delete(LinkedList *ll, int value) {
-    assert(ll != NULL && ll->head != NULL);
+    assert(ll != NULL);
+    assert(ll->head != NULL);
 
     Node *prev = NULL;
     Node *current = ll->head;
@@ -70,7 +71,25 @@ void ll_delete(LinkedList *ll, int value) {
     }
 }
 
-void ll_print(const LinkedList *ll) {
+void ll_reverse(LinkedList *ll) {
+    assert(ll != NULL);
+
+    Node *head = ll->head;
+    Node *curr = head, *prev = NULL, *next = NULL;
+    while (curr != NULL) {
+        next = curr->next;
+        curr->next = prev;
+        prev = curr;
+        curr = next;
+    }
+
+    ll->head = prev;
+    ll->tail = head;
+}
+
+void ll_print(LinkedList *ll) {
+    assert(ll != NULL);
+
     Node *current = ll->head;
     while(current != NULL) {
         printf("%d->", current->data);
@@ -80,7 +99,7 @@ void ll_print(const LinkedList *ll) {
     printf("\n");
 }
 
-void ll_destroy(const LinkedList *ll) {
+void ll_destroy(LinkedList *ll) {
     assert(ll != NULL);
 
     Node *current = ll->head;
@@ -89,10 +108,15 @@ void ll_destroy(const LinkedList *ll) {
         free(current);
         current = next;
     }
+
+    ll->head = NULL;
+    ll->tail = NULL;
 }
 
 int main() {
     LinkedList ll = {0};
+
+    printf("=========== append push delete ===========\n");
 
     for(size_t i = 1; i <= 5; ++i) {
         ll_append(&ll, i);
@@ -110,5 +134,19 @@ int main() {
     ll_print(&ll);
 
     ll_destroy(&ll);
+
+    printf("=========== reverse ===========\n");
+
+    for(size_t i = 1; i <= 10; ++i) {
+        ll_append(&ll, i);
+    }
+    ll_print(&ll);
+
+    ll_reverse(&ll);
+    ll_print(&ll);
+
+    ll_append(&ll, 67);
+    ll_print(&ll);
+
     return 0;
 }
